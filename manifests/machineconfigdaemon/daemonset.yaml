@@ -38,6 +38,8 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: spec.nodeName
+          - name: CONFIG_IGNORE_OSIMAGEURL
+            value: "for now, see https://github.com/openshift/machine-config-operator/pull/273"
       hostNetwork: true
       hostPID: true
       serviceAccountName: machine-config-daemon

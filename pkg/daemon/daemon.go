@@ -52,6 +52,9 @@ type Daemon struct {
 	// bootedOSImageURL is the currently booted URL of the operating system
 	bootedOSImageURL string
 
+	// ignoreOSImageURL instructs the daemon to not apply osImageURL from MachineConfigs (for development/debugging)
+	ignoreOSImageURL bool
+
 	// login client talks to the systemd-logind service for rebooting the
 	// machine
 	loginClient *login1.Conn
@@ -140,6 +143,9 @@ func New(
 		return nil, fmt.Errorf("Error establishing connection to logind dbus: %v", err)
 	}
 
+	ignoreOSImageURLVal, ok := os.LookupEnv("CONFIG_IGNORE_OSIMAGEURL")
+	ignoreOSImageURL := ok && ignoreOSImageURLVal != "";
+
 	osImageURL := ""
 	osVersion := ""
 	// Only pull the osImageURL from OSTree when we are on RHCOS
@@ -165,6 +171,7 @@ func New(
 		fileSystemClient:       fileSystemClient,
 		bootID:                 bootID,
 		bootedOSImageURL:       osImageURL,
+		ignoreOSImageURL:       ignoreOSImageURL,
 		onceFrom:               onceFrom,
 		kubeletHealthzEnabled:  kubeletHealthzEnabled,
 		kubeletHealthzEndpoint: kubeletHealthzEndpoint,
@@ -703,12 +710,29 @@ func (dn *Daemon) isUnspecifiedOS(osImageURL string) bool {
 	return osImageURL == "" || osImageURL == "://dummy"
 }
 
-// checkOS validates the OS image URL and returns true if they match.
-func (dn *Daemon) checkOS(osImageURL string) bool {
-	// XXX: The installer doesn't pivot yet so for now, just make ""
-	// mean "unset, don't pivot". See also: https://github.com/openshift/installer/issues/281
+// shouldApplyOS says whether the daemon should apply an OS update
+func (dn *Daemon) shouldApplyOS(osImageURL string) bool {
+	if dn.OperatingSystem != MachineConfigDaemonOSRHCOS {
+		return false
+	}
+	// We don't yet have the os in the release payload, it's just ""
+	// See: https://github.com/openshift/installer/issues/281
 	if dn.isUnspecifiedOS(osImageURL) {
 		glog.Infof(`No target osImageURL provided`)
+		return false
+	}
+
+	if dn.ignoreOSImageURL {
+		glog.Infof("CONFIG_IGNORE_OSIMAGEURL set, operating system update not applied!")
+		return false
+	}
+
+	return true
+}
+
+// checkOS validates the OS image URL and returns true if they match.
+func (dn *Daemon) checkOS(osImageURL string) bool {
+	if !dn.shouldApplyOS(osImageURL) {
 		return true
 	}
 	return dn.bootedOSImageURL == osImageURL

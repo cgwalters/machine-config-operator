@@ -586,17 +586,13 @@ func (dn *Daemon) updateSSHKeys(newUsers []ignv2_2types.PasswdUser) error {
 
 // updateOS updates the system OS to the one specified in newConfig
 func (dn *Daemon) updateOS(oldConfig, newConfig *mcfgv1.MachineConfig) error {
-	if dn.OperatingSystem != MachineConfigDaemonOSRHCOS {
-		glog.V(2).Infof("Updating of non RHCOS nodes are not supported")
-		return nil
-	}
-	// see similar logic in checkOS()
-	if dn.isUnspecifiedOS(newConfig.Spec.OSImageURL) {
-		glog.Infof(`No target osImageURL provided`)
+	newURL := newConfig.Spec.OSImageURL
+
+	if !dn.shouldApplyOS(newURL) {
 		return nil
 	}
 
-	if newConfig.Spec.OSImageURL == dn.bootedOSImageURL {
+	if newURL == dn.bootedOSImageURL {
 		return nil
 	}
 
@@ -610,7 +606,7 @@ func (dn *Daemon) updateOS(oldConfig, newConfig *mcfgv1.MachineConfig) error {
 		Factor:   2,               // factor by which to increase sleep
 	}, func() (bool, error) {
 		var err error
-		if err = dn.NodeUpdaterClient.RunPivot(newConfig.Spec.OSImageURL); err != nil {
+		if err = dn.NodeUpdaterClient.RunPivot(newURL); err != nil {
 			if exitError, ok := err.(*exec.ExitError); ok {
 				rc := exitError.Sys().(syscall.WaitStatus).ExitStatus()
 				if rc != 0 {

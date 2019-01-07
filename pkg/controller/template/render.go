@@ -91,22 +91,14 @@ func generateMachineConfigs(config *renderConfig, templateDir string) ([]*mcfgv1
 	return cfgs, nil
 }
 
+// generateMachineConfigsForRole is part of generateMachineConfigs; it operates
+// on a specific role which has a set of builtin templates.
 func generateMachineConfigsForRole(config *renderConfig, role string, path string) ([]*mcfgv1.MachineConfig, error) {
+	// Add our built-in templates
 	infos, err := ioutil.ReadDir(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read dir %q: %v", path, err)
 	}
-	// for each role a machine config is created containing the sshauthorized keys to allow for ssh access
-	// ex: role = worker -> machine config "00-worker-ssh" created containing user core and ssh key
-	var tempIgnConfig ignv2_2types.Config
-	tempUser := ignv2_2types.PasswdUser{Name: "core", SSHAuthorizedKeys: []ignv2_2types.SSHAuthorizedKey{ignv2_2types.SSHAuthorizedKey(config.SSHKey)}}
-	tempIgnConfig.Passwd.Users = append(tempIgnConfig.Passwd.Users, tempUser)
-	sshConfigName := "00-" + role + "-ssh"
-	sshMachineConfigForRole := machineConfigFromIgnConfig(role, sshConfigName, &tempIgnConfig)
-
-	cfgs := []*mcfgv1.MachineConfig{}
-	cfgs = append(cfgs, sshMachineConfigForRole)
-
 	for _, info := range infos {
 		if !info.IsDir() {
 			glog.Infof("ignoring non-directory path %q", info.Name())
@@ -121,9 +113,60 @@ func generateMachineConfigsForRole(config *renderConfig, role string, path strin
 		cfgs = append(cfgs, nameConfig)
 	}
 
+	// And derived configs
+	derivedCfgs, err := generateDerivedMachineConfigs(config, role)
+	if err != nil {
+		return nil, err
+	}
+	cfgs = append(cfgs, derivedCfgs)
+
 	return cfgs, nil
 }
 
+// machineConfigForOSImageURL generates a MC fragment that just includes the target OSImageURL.
+func machineConfigForOSImageURL(role string, url string) *mcfgv1.MachineConfig {
+	labels := map[string]string{
+		machineConfigRoleLabelKey: role,
+	}
+	return &mcfgv1.MachineConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: labels,
+			Name:   "00-" + role + "-osimageurl",
+		},
+		Spec: mcfgv1.MachineConfigSpec{
+			OSImageURL: url,
+		},
+	}
+}
+
+// generateDerivedMachineConfigs is part of generateMachineConfigsForRole. It
+// takes care of generating MachineConfig objects which are derived from other
+// components of the cluster configuration. Currently, that's:
+//
+//  - SSH keys from the install configuration
+//  - OSImageURL from the machine-config-osimageurl configmap (which comes from the CVO)
+func generateDerivedMachineConfigs(config *renderConfig, role string) ([]*mcfgv1.MachineConfig, error) {
+	cfgs := []*mcfgv1.MachineConfig{}
+
+	// for each role a machine config is created containing the sshauthorized keys to allow for ssh access
+	// ex: role = worker -> machine config "00-worker-ssh" created containing user core and ssh key
+	var tempIgnConfig ignv2_2types.Config
+	tempUser := ignv2_2types.PasswdUser{Name: "core", SSHAuthorizedKeys: []ignv2_2types.SSHAuthorizedKey{ignv2_2types.SSHAuthorizedKey(config.SSHKey)}}
+	tempIgnConfig.Passwd.Users = append(tempIgnConfig.Passwd.Users, tempUser)
+	sshConfigName := "00-" + role + "-ssh"
+	cfgs = append(cfgs, machineConfigFromIgnConfig(role, sshConfigName, &tempIgnConfig))
+
+	// The osImageURL config
+	configvar := "CONFIG_OSIMAGEURL"
+	osimageurl, ok := os.LookupEnv(configvar)
+	if ok && osimageurl != "" {
+		cfgs = append(cfgs, machineConfigForOSImageURL(role, osimageurl))
+	}
+
+	return cfgs, nil
+}
+
+// generateMachineConfigForName is part of the implementation of generateMachineConfigsForRole
 func generateMachineConfigForName(config *renderConfig, role, name, path string) (*mcfgv1.MachineConfig, error) {
 	platformDirs := []string{}
 	for _, dir := range []string{"_base", config.Platform} {
