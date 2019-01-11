@@ -94,6 +94,8 @@ func generateMachineConfigs(config *renderConfig, templateDir string) ([]*mcfgv1
 // generateMachineConfigsForRole is part of generateMachineConfigs; it operates
 // on a specific role which has a set of builtin templates.
 func generateMachineConfigsForRole(config *renderConfig, role string, path string) ([]*mcfgv1.MachineConfig, error) {
+	cfgs := []*mcfgv1.MachineConfig{}
+
 	// Add our built-in templates
 	infos, err := ioutil.ReadDir(path)
 	if err != nil {
@@ -118,7 +120,7 @@ func generateMachineConfigsForRole(config *renderConfig, role string, path strin
 	if err != nil {
 		return nil, err
 	}
-	cfgs = append(cfgs, derivedCfgs)
+	cfgs = append(cfgs, derivedCfgs...)
 
 	return cfgs, nil
 }
@@ -156,11 +158,8 @@ func generateDerivedMachineConfigs(config *renderConfig, role string) ([]*mcfgv1
 	sshConfigName := "00-" + role + "-ssh"
 	cfgs = append(cfgs, machineConfigFromIgnConfig(role, sshConfigName, &tempIgnConfig))
 
-	// The osImageURL config
-	configvar := "CONFIG_OSIMAGEURL"
-	osimageurl, ok := os.LookupEnv(configvar)
-	if ok && osimageurl != "" {
-		cfgs = append(cfgs, machineConfigForOSImageURL(role, osimageurl))
+	if config.OSImageURL != "" {
+		cfgs = append(cfgs, machineConfigForOSImageURL(role, config.OSImageURL))
 	}
 
 	return cfgs, nil

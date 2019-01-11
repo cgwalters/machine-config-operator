@@ -57,6 +57,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 
 		ctx.InformerFactory.Start(ctx.Stop)
 		ctx.KubeInformerFactory.Start(ctx.Stop)
+		ctx.KubeNamespacedInformerFactory.Start(ctx.Stop)
 		close(ctx.InformersStarted)
 		close(ctx.KubeInformersStarted)
 
