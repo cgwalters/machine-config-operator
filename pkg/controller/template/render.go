@@ -131,6 +131,22 @@ func platformFromControllerConfigSpec(ic *mcfgv1.ControllerConfigSpec) (string, 
 	}
 }
 
+// osUpdatesEnabledForRole parses the OSUpdatesDisabledForPools flag, which is a
+// way to control injection of the OSImageURL into rendered machine configs.
+// Primarily intended for development/testing.
+func osUpdatesEnabledForRole(config *RenderConfig, role string) bool {
+	for _, mtype := range config.OSUpdatesDisabledForPools {
+		// "*" disables everything
+		if mtype == "*" {
+			return false
+		}
+		if mtype == role {
+			return false
+		}
+	}
+	return true
+}
+
 func generateMachineConfigForName(config *RenderConfig, role, name, path string) (*mcfgv1.MachineConfig, error) {
 	platform, err := platformFromControllerConfigSpec(config.ControllerConfigSpec)
 	if err != nil {
@@ -233,7 +249,12 @@ func generateMachineConfigForName(config *RenderConfig, role, name, path string)
 		return nil, fmt.Errorf("error transpiling ct config to Ignition config: %v", err)
 	}
 
-	return MachineConfigFromIgnConfig(role, name, ignCfg), nil
+	mcfg := MachineConfigFromIgnConfig(role, name, ignCfg)
+	if osUpdatesEnabledForRole(config, role) {
+		mcfg.Spec.OSImageURL = config.OSImageURL
+	}
+
+	return mcfg, nil
 }
 
 const (

@@ -354,6 +354,7 @@ func getRenderConfig(mc *mcfgv1.MCOConfig, etcdCAData, rootCAData []byte, ps *v1
 		PullSecret:          ps,
 		SSHKey:              mc.Spec.SSHKey,
 		OSImageURL:          imgs.MachineOSContent,
+		OSUpdatesDisabledForPools: []string{"*"}, // For now
 		Images: map[string]string{
 			templatectrl.EtcdImageKey:    imgs.Etcd,
 			templatectrl.SetupEtcdEnvKey: imgs.SetupEtcdEnv,

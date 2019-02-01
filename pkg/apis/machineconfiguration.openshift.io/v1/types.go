@@ -141,6 +141,10 @@ type ControllerConfigSpec struct {
 	// Images is map of images that are used by the controller.
 	Images map[string]string `json:"images"`
 
+	// By default, operating system updates are enabled for a pool.  This
+	// flag allows disabling them.  If any entry is "*" it will match all pools.
+	OSUpdatesDisabledForPools []string `json:"osUpdatesDisabledForPools,omitempty"`
+
 	// Sourced from configmap/machine-config-osimageurl
 	OSImageURL string `json:"osImageURL"`
 }
