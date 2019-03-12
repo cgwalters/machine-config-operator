@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/login1"
-	"github.com/coreos/go-systemd/sdjournal"
 	ignv2 "github.com/coreos/ignition/config/v2_2"
 	ignv2_2types "github.com/coreos/ignition/config/v2_2/types"
 	"github.com/golang/glog"
@@ -270,33 +269,11 @@ const (
 )
 
 func (dn *Daemon) detectEarlySSHAccessesFromBoot() error {
-	journal, err := sdjournal.NewJournal()
+	o, err := exec.Command("journalctl", "-b", "-o", "cat", "MESSAGE_ID=" + sdMessageSessionStart).CombinedOutput()
 	if err != nil {
 		return err
 	}
-	defer journal.Close()
-	if err := journal.AddMatch("MESSAGE_ID=" + sdMessageSessionStart); err != nil {
-		return err
-	}
-	if err := journal.SeekHead(); err != nil {
-		return err
-	}
-	r, err := journal.Next()
-	if err != nil {
-		return err
-	}
-	// journal EOF
-	if r == 0 {
-		return nil
-	}
-	// just one entry is enough to understand if someone jumped on the node
-	// from the very first boot
-	entry, err := journal.GetEntry()
-	if err != nil {
-		return err
-	}
-	// just sanity checking
-	if entry != nil {
+	if len(o) > 0 {
 		glog.Info("Detected a login session before the daemon took over on first boot")
 		glog.Infof("Applying annotation: %v", machineConfigDaemonSSHAccessAnnotationKey)
 		if err := dn.applySSHAccessedAnnotation(); err != nil {
