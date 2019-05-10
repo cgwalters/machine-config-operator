@@ -31,10 +31,30 @@ type kubeconfigFunc func() (kubeconfigData []byte, rootCAData []byte, err error)
 // appenderFunc appends Config.
 type appenderFunc func(*ignv2_2types.Config) error
 
+// Error is returned by the GetConfig API
+type Error struct {
+	msg			string
+	forbidden	bool
+}
+
+// Error returns the string
+func (e *Error) Error() string {
+	return e.msg
+}
+
+// IsForbidden says if err is an Error with forbidden set
+func IsForbidden(err error) bool {
+	switch t := err.(type) {
+	case *Error:
+		return t.forbidden
+	}
+	return false
+}
+
 // Server defines the interface that is implemented by different
 // machine config server implementations.
 type Server interface {
-	GetConfig(poolRequest) (*ignv2_2types.Config, error)
+	GetConfig(cr poolRequest, auth string) (*ignv2_2types.Config, error)
 }
 
 func getAppenders(cr poolRequest, currMachineConfig string, f kubeconfigFunc, osimageurl string) []appenderFunc {
