@@ -14,6 +14,7 @@ import (
 	"github.com/openshift/library-go/pkg/operator/v1helpers"
 	"github.com/openshift/machine-config-operator/internal"
 	mcfgv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	ctrlcommon "github.com/openshift/machine-config-operator/pkg/controller/common"
 	daemonconsts "github.com/openshift/machine-config-operator/pkg/daemon/constants"
 	mcfgclientset "github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned"
 	"github.com/openshift/machine-config-operator/pkg/generated/clientset/versioned/scheme"
@@ -40,9 +41,6 @@ import (
 )
 
 const (
-	// MasterLabel defines the label associated with master node. The master taint uses the same label as taint's key
-	MasterLabel = "node-role.kubernetes.io/master"
-
 	// WorkerLabel defines the label associated with worker node.
 	WorkerLabel = "node-role.kubernetes.io/worker"
 
@@ -159,7 +157,7 @@ func (ctrl *Controller) Run(workers int, stopCh <-chan struct{}) {
 }
 
 func (ctrl *Controller) getCurrentMasters() ([]*corev1.Node, error) {
-	nodeList, err := ctrl.nodeLister.List(labels.SelectorFromSet(labels.Set{MasterLabel: ""}))
+	nodeList, err := ctrl.nodeLister.List(labels.SelectorFromSet(labels.Set{ctrlcommon.MasterLabel: ""}))
 	if err != nil {
 		return nil, fmt.Errorf("error while listing master nodes %v", err)
 	}
@@ -239,13 +237,13 @@ func (ctrl *Controller) makeMasterNodeUnSchedulable(node *corev1.Node) error {
 		// Add master taint
 		hasMasterTaint := false
 		for _, taint := range node.Spec.Taints {
-			if taint.Key == MasterLabel && taint.Effect == corev1.TaintEffectNoSchedule {
+			if taint.Key == ctrlcommon.MasterLabel && taint.Effect == corev1.TaintEffectNoSchedule {
 				hasMasterTaint = true
 			}
 		}
 		if !hasMasterTaint {
 			newTaints := node.Spec.Taints
-			masterUnSchedulableTaint := corev1.Taint{Key: MasterLabel, Effect: corev1.TaintEffectNoSchedule}
+			masterUnSchedulableTaint := corev1.Taint{Key: ctrlcommon.MasterLabel, Effect: corev1.TaintEffectNoSchedule}
 			newTaints = append(newTaints, masterUnSchedulableTaint)
 			node.Spec.Taints = newTaints
 		}
@@ -269,7 +267,7 @@ func (ctrl *Controller) makeMasterNodeSchedulable(node *corev1.Node) error {
 		// Remove master taint
 		newTaints := []corev1.Taint{}
 		for _, t := range node.Spec.Taints {
-			if t.Key == MasterLabel && t.Effect == corev1.TaintEffectNoSchedule {
+			if t.Key == ctrlcommon.MasterLabel && t.Effect == corev1.TaintEffectNoSchedule {
 				continue
 			}
 			newTaints = append(newTaints, t)
@@ -330,7 +328,7 @@ func (ctrl *Controller) getMastersSchedulable() (bool, error) {
 
 // Determine if a given Node is a master
 func (ctrl *Controller) isMaster(node *corev1.Node) bool {
-	_, master := node.ObjectMeta.Labels[MasterLabel]
+	_, master := node.ObjectMeta.Labels[ctrlcommon.MasterLabel]
 	return master
 }
 
@@ -739,11 +737,12 @@ func (ctrl *Controller) syncMachineConfigPool(key string) error {
 		return err
 	}
 
-	candidates := getCandidateMachines(pool, nodes, maxunavail)
-	for _, node := range candidates {
-		if err := ctrl.setDesiredMachineConfigAnnotation(node.Name, pool.Spec.Configuration.Name); err != nil {
+	candidates, capacity := getAllCandidateMachines(pool, nodes, maxunavail)
+	if len(candidates) > 0 {
+		glog.Infof("Have %d candidate nodes for update, capacity: %d", len(candidates), capacity)
+		if err := ctrl.updateCandidateMachines(pool, candidates, capacity); err != nil {
 			if syncErr := ctrl.syncStatusOnly(pool); syncErr != nil {
-				return goerrs.Wrapf(err, "error setting desired machine config annotation for node %q, pool %q, sync error: %v", node.Name, pool.Name, syncErr)
+				return goerrs.Wrapf(err, "error setting desired machine config annotation for pool %q, sync error: %v", pool.Name, syncErr)
 			}
 			return err
 		}
@@ -814,13 +813,15 @@ func (ctrl *Controller) setDesiredMachineConfigAnnotation(nodeName, currentConfi
 	})
 }
 
-func getCandidateMachines(pool *mcfgv1.MachineConfigPool, nodesInPool []*corev1.Node, maxUnavailable int) []*corev1.Node {
+// getAllCandidateMachines returns all possible nodes which can be updated to the target config, along with a maximum
+// capacity.  It is the reponsibility of the caller to choose a subset of the nodes given the capacity.
+func getAllCandidateMachines(pool *mcfgv1.MachineConfigPool, nodesInPool []*corev1.Node, maxUnavailable int) ([]*corev1.Node, uint) {
 	targetConfig := pool.Spec.Configuration.Name
 
 	unavail := getUnavailableMachines(nodesInPool)
 	// If we're at capacity, there's nothing to do.
 	if len(unavail) >= maxUnavailable {
-		return nil
+		return nil, 0
 	}
 	capacity := maxUnavailable - len(unavail)
 	failingThisConfig := 0
@@ -841,14 +842,64 @@ func getCandidateMachines(pool *mcfgv1.MachineConfigPool, nodesInPool []*corev1.
 	// availability - it might be a transient issue, and if the issue
 	// clears we don't want multiple to update at once.
 	if failingThisConfig >= capacity {
-		return nil
+		return nil, 0
 	}
 	capacity -= failingThisConfig
 
-	if len(nodes) < capacity {
+	return nodes, uint(capacity)
+}
+
+// getCandidateMachines returns the maximum subset of nodes which can be updated to the target config given availability constraints.
+func getCandidateMachines(pool *mcfgv1.MachineConfigPool, nodesInPool []*corev1.Node, maxUnavailable int) []*corev1.Node {
+	nodes, capacity := getAllCandidateMachines(pool, nodesInPool, maxUnavailable)
+	if uint(len(nodes)) < capacity {
 		return nodes
 	}
 	return nodes[:capacity]
+}
+
+func (ctrl *Controller) getCurrentEtcdLeader(candidates []*corev1.Node) (*corev1.Node, error) {
+	return nil, fmt.Errorf("no leader")
+}
+
+func (ctrl *Controller) filterControlPlaneCandidateNodes(pool *mcfgv1.MachineConfigPool, candidates []*corev1.Node, capacity uint) ([]*corev1.Node, uint, error) {
+	if len(candidates) <= 1 {
+		return candidates, capacity, nil
+	}
+	etcdLeader, err := ctrl.getCurrentEtcdLeader(candidates)
+	if err != nil {
+		glog.Warningf("Failed to find current etcd leader (continuing anyways): %v", err)
+	}
+	var newCandidates []*corev1.Node
+	for _, node := range candidates {
+		if node == etcdLeader {
+			continue
+		}
+		newCandidates = append(newCandidates, node)
+	}
+	return newCandidates, capacity, nil
+}
+
+// updateCandidateMachines sets the desiredConfig annotation the candidate machines
+func (ctrl *Controller) updateCandidateMachines(pool *mcfgv1.MachineConfigPool, candidates []*corev1.Node, capacity uint) error {
+	if pool.Name == "master" {
+		var err error
+		candidates, capacity, err = ctrl.filterControlPlaneCandidateNodes(pool, candidates, capacity)
+		if err != nil {
+			return err
+		}
+		glog.Infof("master pool filtered to %d candidate nodes for update, capacity: %d", len(candidates), capacity)
+	} else {
+		if capacity < uint(len(candidates)) {
+			candidates = candidates[:capacity]
+		}
+	}
+	for _, node := range candidates {
+		if err := ctrl.setDesiredMachineConfigAnnotation(node.Name, pool.Spec.Configuration.Name); err != nil {
+			return goerrs.Wrapf(err, "setting desired config for node %s", node.Name)
+		}
+	}
+	return nil
 }
 
 func maxUnavailable(pool *mcfgv1.MachineConfigPool, nodes []*corev1.Node) (int, error) {

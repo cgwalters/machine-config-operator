@@ -42,6 +42,7 @@ require (
 	github.com/hashicorp/golang-lru v0.5.3 // indirect
 	github.com/huandu/xstrings v1.2.0 // indirect
 	github.com/imdario/mergo v0.3.7
+	github.com/json-iterator/go v1.1.10 // indirect
 	github.com/konsorten/go-windows-terminal-sequences v1.0.2 // indirect
 	github.com/magiconair/properties v1.8.1 // indirect
 	github.com/mattn/go-isatty v0.0.9 // indirect
@@ -65,8 +66,10 @@ require (
 	github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb // indirect
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
 	github.com/xeipuuv/gojsonschema v1.1.0 // indirect
+	go.etcd.io/etcd v0.0.0-20191023171146-3cf2f69b5738
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
 	google.golang.org/appengine v1.6.1 // indirect
+	google.golang.org/grpc v1.26.0
 	k8s.io/api v0.18.3
 	k8s.io/apiextensions-apiserver v0.18.0
 	k8s.io/apimachinery v0.18.3

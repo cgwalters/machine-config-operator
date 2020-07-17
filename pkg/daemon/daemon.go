@@ -111,6 +111,9 @@ type Daemon struct {
 	enqueueNode func(*corev1.Node)
 	syncHandler func(node string) error
 
+	// isControlPlane is true if this node is a control plane (master).
+	// The machine may also be a worker (with schedulable masters).
+	isControlPlane bool
 	booting bool
 
 	currentConfigPath string
@@ -952,6 +955,18 @@ func (dn *Daemon) checkStateOnFirstRun() error {
 	}
 	// Update our cached copy
 	dn.node = node
+
+	// Some parts of the MCO dispatch on whether or not we're managing a control plane node
+	if _, isControlPlane := node.Labels[ctrlcommon.MasterLabel]; isControlPlane {
+		dn.isControlPlane = true
+		glog.Infof("Node %s is part of the control plane", node.Name)
+		if err := dn.synchronizeControlPlaneState(); err != nil {
+			return errors.Wrapf(err, "syncing control plane OS state")
+		}
+	} else {
+		glog.Infof("Node %s is not labeled %s", node.Name, ctrlcommon.MasterLabel)
+	}
+
 	pendingState, err := dn.getPendingState()
 	if err != nil {
 		return err

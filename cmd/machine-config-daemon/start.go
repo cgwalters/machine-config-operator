@@ -157,6 +157,26 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	etcdchan, err := daemon.WatchCurrentEtcdLeader()
+	if err != nil {
+		glog.Fatal(err)
+		return
+	}
+	leader := ""
+	glog.Infof("watching etcd leader")
+	for {
+		if leader != "" {
+			break
+		}
+		select {
+		case leader := <-etcdchan:
+			if leader == "" {
+				break
+			}
+			glog.Infof("leader: %s\n", leader)
+		}
+	}
+
 	// In the cluster case, for now we copy our binary out to the host
 	// for SELinux reasons, see https://bugzilla.redhat.com/show_bug.cgi?id=1839065
 	if err := selfCopyToHost(); err != nil {
